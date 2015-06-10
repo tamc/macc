@@ -1,0 +1,680 @@
+<html>
+<head>
+<!-- Probably always a good idea to be utf-8 -->
+<meta charset="utf-8"> 
+<!-- This prevents Internet Explorer from entering 'quirks' mode -->
+<meta content='IE=edge' http-equiv='X-UA-Compatible'>
+<!-- So iPads can view the app in full screen -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link href='http://fonts.googleapis.com/css?family=Lato:300' rel='stylesheet' type='text/css'>
+<title>MACC &mdash; Global Calculator</title>
+<!-- assets is a function definied in the Helper module in src/server.rb --> 
+<script src='d3.min.js' type='text/javascript'></script>
+</head>
+<style>
+body {
+  font-family: 'Lato', sans-serif;
+}
+h1, #name, #chart, .controls {
+  width: 100%;
+  text-align: center;
+  margin: 0;
+}
+
+
+.axis path, .axis line {
+  fill: none;
+  stroke: #000;
+  shape-rendering: crispEdges;
+}
+
+rect.box.hover {
+  fill: #f00;
+  cursor: pointer;
+}
+
+text.label.hover {
+  transition: fill 1s;
+  fill: #f00;
+  cursor: pointer;
+}
+
+line.label.hover {
+  transition: stroke 1s;
+  stroke: #f00;
+}
+
+rect {
+  transition: fill 1s;
+  fill-opacity: 0.5;
+  stroke: #555;
+  stroke-opacity: 0.5;
+  shape-rendering: crispEdges;
+}
+
+rect.demographics {
+  fill: #1f77b4;
+}
+
+rect.lifestyle {
+  fill: #ff7f0e;
+}
+
+rect.efficiency {
+  fill: #2ca02c;
+}
+
+rect.fuel {
+  fill: #17becf;
+}
+
+rect.ccs {
+  fill: #9467bd;
+}
+
+rect.ggr {
+  fill: #8c564b;
+}
+
+rect.bio {
+  fill: #e377c2;
+}
+
+line.label {
+  stroke: #ccc;
+  shape-rendering: crispEdges;
+}
+
+text.label {
+  fill: #777;
+  text-anchor: end;
+}
+
+text.shadow {
+  fill: white;
+  stroke: white;
+  stroke-width: 3px;
+  text-anchor: end;
+}
+
+text.quadrant {
+  fill: grey;
+  font-size: 9px;
+}
+
+text.right {
+  text-anchor: end;
+}
+
+text.rightlabel {
+  text-anchor: start;
+}
+
+
+div#infobox {
+  transition: fill 1s;
+  transition: color 1s;
+  background-color: rgba(255,255,255,0);
+  color: rgba(0,0,0,0);
+  position: fixed;
+  padding: 10px;
+  right: 0px;
+  bottom: 0px;
+}
+
+div#infobox.show {
+  background-color: rgba(255,255,255,0.7);
+  color: rgba(0,0,0,1);
+}
+
+#tsv {
+  width: 97%;
+  height: 200px;
+}
+
+
+
+  </style>
+  <body>
+  <h1>Marginal Abatement Cost Curve chart drawing</h1>
+  <p>
+  Paste tab separated data in as "<code>Name [TAB] Category [TAB] Abatement potential [TAB] Cost [NEWLINE]</code>". 
+  There shouldn't be a header row. Tab separated data is what you get if you copy and paste from Excel.
+  </p>
+  <textarea id='tsv'>
+Thing 1	Category 1	6	-12
+Thing 2	Category 2	10	10
+Thing 3	Category 1	5	100
+Thing 4	Category 2	-5	10
+Thing 5	Category 1	-15	-25
+  </textarea>
+  <br>
+  <input type='submit' id='clear' value='clear data'/>
+  <p>x axis name<input value='MtCO2e in 2025' id='x_axis_name'></p>
+  <p>y axis name<input value='£2011/tCO2e' id='y_axis_name'></p>
+  <p>incremental cost name<input value='£M' id='incremental_cost_name'></p>
+  <input type='submit' id='go' value='Redraw chart'/>
+</div>
+<div id='chart'> </div>
+<div id='infobox'></div>
+<script>
+
+function zero_nans(n) {
+  if(typeof n != 'number') { return 0; }
+  if(isNaN(n)) { return 0; }
+  return n;
+}
+
+// Expects data to have a specified delta_x and delta_y and returns
+// it with a series of x, y, w and h attributes, where:
+// w is abs(delta_x), h is abs(delta_y/abs(delta_x)) x and y are the top left
+// corners of a rectangle, so that the rectangles are sorted
+// in order of increasing h, and so that w and h never have 
+// to be negative (because svg doesn't allow rectangles with
+// negative widths or heights).
+d3.layout.macc = function() {
+  var values = function(d) { return d; }, // d3_identity,
+      label_minimum_gap = 10,
+      delta_x_minimum_for_label = 0,
+      out = d3_layout_macc_out,
+      delta_x = d3_layout_macc_delta_x,
+      delta_y = d3_layout_macc_delta_y,
+      x_domain = [0,0],
+      always_include_label = d3_layout_macc_always_include_label,
+      h = d3_layout_macc_h; // In case want to do something else than h = abs(delta_y/delta_x)
+
+  function macc(data) {
+
+    // Convert series to canonical two-dimensional representation
+    var series = data.map(function(d,i) {
+          return values.call(macc, d, i);
+        });
+
+    // Convert each series to canonical [[d,delta_x,delta_y,h]] representation
+    // where h = y/x and d is the original datum
+    var points = series.map(function(d,i) {
+          var new_delta_x = zero_nans(delta_x.call(macc, d, i)), 
+              new_delta_y = zero_nans(delta_y.call(macc, d, i)),
+              new_h = zero_nans(h.call(macc, d, i, new_delta_x, new_delta_y));
+          return [d, new_delta_x, new_delta_y, new_h];
+        });
+
+    // Now need to sort the data. We want items with the most
+    // negative h to be closest to x = 0. Because the delta_x values
+    // might be negative, that means sliceting into positive
+    // and negative groups
+    var negative_delta_x = [],
+        positive_delta_x = [],
+        n = points.length,
+        i,
+        p;
+
+    for(i=0; i < n; ++i) {
+      p = points[i]
+      if(p[1] < 0) { // delta_x is negative
+        negative_delta_x.push(p);
+      } else {
+        positive_delta_x.push(p);
+      }
+    }
+
+    // Now we sort the negative and positive groups
+    negative_delta_x.sort(function(a,b) { return a[3] - b[3]; }); // Sorting by h
+    positive_delta_x.sort(function(a,b) { return a[3] - b[3]; }); // Sorting by h
+
+    // Now we work out the x values, turning the points into the form [[d, delta_x, delta_y, h, x]]
+    var x = 0;
+    negative_delta_x = negative_delta_x.map(function(d,i) {
+        x = x + d[1]; // Do the addition first, so x is top left of rect
+        d.push(x);
+        return d;
+        });
+
+    x_domain[0] = x;
+
+    x = 0;
+    positive_delta_x = positive_delta_x.map(function(d,i) {
+        d.push(x);
+        x = x + d[1]; // Do the addition second, so x is the top left of the rec
+        return d;
+        });
+
+    x_domain[1] = x;
+
+    // Now we slice the groups again, according to whether they have negative or positive h
+    var negative_delta_x_negative_h,
+        negative_delta_x_positive_h,
+        positive_delta_x_negative_h,
+        positive_delta_x_positive_h;
+
+    n = negative_delta_x.length;
+    for(i=0; i<n; ++i) {
+      if(negative_delta_x[i][3]>0) { break; }
+    };
+    negative_delta_x_negative_h = negative_delta_x.slice(0,i);
+    negative_delta_x_positive_h = negative_delta_x.slice(i,n);
+
+    n = positive_delta_x.length;
+    for(i=0; i<n; ++i) {
+      if(positive_delta_x[i][3]>0) { break; }
+    };
+    positive_delta_x_negative_h = positive_delta_x.slice(0,i);
+    positive_delta_x_positive_h = positive_delta_x.slice(i,n);
+
+    var minimum_space_between_label_and_block = label_minimum_gap/5;
+
+    // now negative_delta_x_positive_h, top left is at h
+    // working backwards to align labels
+    var label_y = 0;
+    n = negative_delta_x_positive_h.length;
+    for(i=0; i<n; ++i) {
+      p = negative_delta_x_positive_h[i];
+      if(always_include_label(p[0]) || (-p[1]>delta_x_minimum_for_label)) {
+        if((p[3]-label_y)<label_minimum_gap) {
+          label_y = label_y + label_minimum_gap;
+        } else {
+          label_y = p[3] + minimum_space_between_label_and_block;
+        }
+      }
+      out.call(macc, p[0], p[4], p[3], -p[1], p[3], label_y, true); // d, x, y, w, h, label_y
+    };
+
+    // Now negative_delta_x_negative_h, top left is on the axis
+    label_y = 0;
+    n = negative_delta_x_negative_h.length;
+    for(i=n-1; i>=0; --i) {
+      p = negative_delta_x_negative_h[i];
+      if(always_include_label(p[0]) || (-p[1]>delta_x_minimum_for_label)) {
+        if(-(p[3]-label_y)<label_minimum_gap) {
+          label_y = label_y - label_minimum_gap;
+        } else {
+          label_y = p[3] - minimum_space_between_label_and_block;
+        }
+      }
+      out.call(macc, p[0], p[4], 0, -p[1], -p[3], label_y - label_minimum_gap, false); // d, x, y, w, h, label_y
+    };
+
+    // Now postive_delta_x_postive_h
+    // making sure the y is top left (in this case h above the axis)
+    label_y = 0;
+    n = positive_delta_x_positive_h.length;
+    for(i=0; i<n; ++i) {
+      p = positive_delta_x_positive_h[i];
+      if(always_include_label(p[0]) || (p[1]>delta_x_minimum_for_label)) {
+        if((p[3]-label_y)<label_minimum_gap) {
+          label_y = label_y + label_minimum_gap;
+        } else {
+          label_y = p[3] + minimum_space_between_label_and_block;
+        }
+      }
+      out.call(macc, p[0], p[4], p[3], p[1], p[3], label_y, false); // d, x, y, w, h, label_y, label_to_right
+    };
+
+    // Now positive_delta_x_negative_h, top left is on the axis
+    // working backwards to align labels
+    label_y = 0;
+    n = positive_delta_x_negative_h.length;
+    for(i=n-1; i>=0; --i) {
+      p = positive_delta_x_negative_h[i];
+      if(always_include_label(p[0]) || (p[1]>delta_x_minimum_for_label)) {
+        if(-(p[3]-label_y)<label_minimum_gap) {
+          label_y = label_y - label_minimum_gap;
+        } else {
+          label_y = p[3] - minimum_space_between_label_and_block;
+        }
+      }
+      out.call(macc, p[0], p[4], 0, p[1], -p[3], label_y - label_minimum_gap, true); // d, x, y, w, h, label_y
+    };
+
+      
+    return data;
+  }
+
+  macc.values = function(z) {
+    if (!arguments.length) return values;
+    values = z;
+    return macc;
+  };
+
+  macc.delta_x = function(z) {
+    if (!arguments.length) return delta_x;
+    delta_x = z;
+    return macc;
+  };
+
+  macc.delta_y = function(z) {
+    if (!arguments.length) return delta_y;
+    delta_y = z;
+    return macc;
+  };
+
+  macc.h = function(z) {
+    if (!arguments.length) return y;
+    h = z;
+    return macc;
+  };
+
+  macc.out = function(z) {
+    if (!arguments.length) return out;
+    out = z;
+    return macc;
+  };
+
+  macc.x_domain = function() {
+    return x_domain;
+  }
+
+  // The minimum vertical space for the labels
+  macc.label_minimum_gap = function(z) {
+    if (!arguments.length) return label_minimum_gap;
+    label_minimum_gap = z;
+    return macc;
+  };
+
+  // If delta_x is less than this minimum, then no
+  // space is left for the label, except if the function below returns true
+  macc.delta_x_minimum_for_label = function(z) {
+    if (!arguments.length) return delta_x_minimum_for_label;
+    delta_x_minimum_for_label = z;
+    return macc;
+  };
+
+  macc.always_include_label = function(z) {
+    if (!arguments.length) return always_include_label;
+    always_include_label = z;
+    return macc;
+  };
+
+  return macc;
+}
+
+function d3_layout_macc_delta_x(d) {
+  return d.delta_x;
+}
+
+function d3_layout_macc_delta_y(d) {
+  return d.delta_y;
+}
+  
+function d3_layout_macc_out(d, x, y, w, h, label_y, label_to_right) {
+  d.x = x;
+  d.y = y;
+  d.w = w;
+  d.h = h;
+  d.label_y = label_y;
+  d.label_y_anchor = y > 0 ? y : y-h;
+  d.label_x = x+(w/2);
+  d.label_to_right = label_to_right; // If true, label_x is to left of label, if false, label_x is to right of label
+}
+
+function d3_layout_macc_h(d, i, delta_x, delta_y) {
+  if(delta_x == 0 ) { return 0; }
+  return delta_y/Math.abs(delta_x);
+}
+
+function d3_layout_macc_always_include_label(d) {
+  return false;
+}
+
+var data = [];
+
+var x_axis_name = "";
+var y_axis_name = "";
+var incremental_cost_name = "";
+
+var format = d3.format(".0f");
+
+var margin = {top: 50, right: 100, bottom: 300, left: 100},
+    width = window.innerWidth - margin.left - margin.right,
+    height = window.innerHeight - margin.top - margin.bottom;
+
+var x = d3.scale.linear()
+    .domain([0,300])
+    .range([0, width]);
+
+var y = d3.scale.linear()
+    .domain([-500,500])
+    .range([height, 0]);
+
+var xAxis = d3.svg.axis()
+    .scale(x)
+    .orient("bottom");
+
+var yAxis = d3.svg.axis()
+    .scale(y)
+    .orient("left");
+
+var delta_x_minimum_for_label = x.invert(20)-x.invert(0);
+
+var highlighted_rect = undefined;
+
+var maccLayout = d3.layout.macc()
+    .delta_x(function(d) { return d.abatement })
+    .delta_y(function(d) { return d.incremental_cost; })
+    .delta_x_minimum_for_label(delta_x_minimum_for_label)
+    .always_include_label(function(d) { return d == highlighted_rect; });
+
+function show_label(d) {
+  return (d == highlighted_rect) || (d.w > delta_x_minimum_for_label)
+}
+
+function label_y_position(d) {
+  var desired_y = y(d.label_y)+(d.label_y < 0 ? 5 : -5);
+  desired_y = Math.min(y.range()[0]+margin.bottom-20, desired_y);
+  desired_y = Math.max(y.range()[1]-margin.top+20, desired_y);
+  return desired_y;
+}
+
+function draw_macc() { 
+
+  data = maccLayout(data);
+
+  // Get the x range in the data
+  data_x_domain = maccLayout.x_domain();
+  // And the y range in the data
+  data_y_domain = d3.extent(data.map(function(d) { return (d.incremental_cost/d.abatement); }));
+
+  // Now change the axis to something nice that encompasses that range
+  x.domain(data_x_domain).nice();
+  y.domain(data_y_domain).nice();
+  // Now rework out how much space we have for drawing labels
+  delta_x_minimum_for_label = x.invert(20)-x.invert(0);
+  maccLayout.delta_x_minimum_for_label(delta_x_minimum_for_label);
+  maccLayout.label_minimum_gap(y.invert(0)-y.invert(20));  
+  // And sadly, we now need to rework the maccLayout
+  data = maccLayout(data);
+  
+  var svg = d3.select("#chart").selectAll('svg').data([data]);
+
+  var gEnter = svg.enter().append("svg")
+    .attr("width", width + margin.left + margin.right)
+    .attr("height", height + margin.top + margin.bottom)
+    .append("g")
+    .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+  svg = svg.select('g');
+
+  // Arrange some groups in the right order
+  gEnter.append("g").attr("id", "boxlayer");
+  gEnter.append("g").attr("id", "axislayer");
+  gEnter.append("g").attr("id", "shadowlayer");
+  gEnter.append("g").attr("id", "labellayer");
+  gEnter.append("g").attr("id", "linelayer");
+
+  // Lay out the boxes
+  var rects = svg.select("g#boxlayer").selectAll("rect.box")
+    .data(data, function(d) { return d.id; });
+
+  rects.exit().remove();
+
+  rects.enter().append("rect")
+    .attr("class", "box")
+    .on('mouseover', function(d) { highlighted_rect = d; draw_macc(); })
+    .on('mouseout', function(d) { highlighted_rect = undefined; draw_macc(); });
+  
+  rects
+    .classed("hover", function(d) { return d == highlighted_rect; })
+    .attr("style", function(d) { return "fill:"+d.color; })
+  .transition()
+    .attr("x", function(d) { return x(d.x); })
+    .attr("width", function(d) { return x(d.w)-x(0) })
+    .attr("y", function(d) { return y(d.y); })
+    .attr("height", function(d) { return  y(0)-y(d.h); });
+
+  // Axes next, so they are in front of rects but behind labels
+  var axisLayer = gEnter.select("g#axislayer");
+
+  axisLayer.append("g").attr("class", "y axis")
+    .attr("transform", "translate(" + x(0) + ",0)")
+    .call(yAxis);
+
+  axisLayer.append("g").attr("class", "x axis")
+    .attr("transform", "translate(0, " + y(0) + ")")
+    .call(xAxis);
+
+  svg.select(".y.axis").transition()
+    .attr("transform", "translate(" + x(0) + ",0)")
+    .call(yAxis);
+
+  svg.select(".x.axis").transition()
+    .attr("transform", "translate(0, " + y(0) + ")")
+    .call(xAxis);
+
+  axisLayer.append("text")
+    .classed("ylabel", true)
+    .text(y_axis_name)
+    .attr("y", y.range()[1]-12);
+
+  svg.select('.ylabel').text(y_axis_name);
+
+  svg.select(".ylabel").transition()
+    .attr("x", x(0)-47);
+
+  axisLayer.append("text")
+    .classed("xlabel", true)
+    .attr("x", x.range()[1]-41)
+    .attr("y", y(0)+42);
+
+  svg.select('.xlabel').text(x_axis_name);
+
+  // Now we lay out some shadow labels (so that the labels stand out)
+
+  var shadows = svg.select("g#shadowlayer").selectAll("text.shadow")
+    .data(function(data) { return data.filter(show_label); }, function(d) { return d.id; });
+
+  shadows.exit().remove();
+
+  shadows.enter().append('text')
+    .classed('shadow', true);
+
+  shadows
+    .order()
+    .classed("rightlabel", function(d) { return d.label_to_right })
+    .text(function(d) { return d.name; })
+    .transition() 
+    .attr("x", function(d) { return x(d.label_x); })
+    .attr("y", label_y_position);
+
+  // Now we lay out the actual labels
+
+  var labels = svg.select("g#labellayer").selectAll("text.label")
+    .data(function(data) { return data.filter(show_label); }, function(d) { return d.id; });
+
+  labels.exit().remove();
+
+  labels.enter().append('text')
+    .classed('label', true)
+    .on('mouseover', function(d) { highlighted_rect = d; draw_macc(); })
+    .on('mouseout', function(d) { highlighted_rect = undefined; draw_macc(); })
+    .on('click', function(d) { set(d.code); })
+    .attr("x", function(d) { return x(d.label_x); })
+    .attr("y", label_y_position);
+
+  labels
+    .order()
+    .classed("hover", function(d) { return d == highlighted_rect; })
+    .classed("rightlabel", function(d) { return d.label_to_right })
+    .text(function(d) { return d.name; })
+    .transition() 
+    .attr("x", function(d) { return x(d.label_x); })
+    .attr("y", label_y_position);
+
+  // Now we lay ou the lines connecting the rect to the label
+  var lines = svg.select("g#linelayer").selectAll("line.label")
+    .data(function(data) { return data.filter(show_label); }, function(d) { return d.id; });
+
+  lines.exit().remove();
+
+  lines.enter().append('line')
+    .classed('label', true)
+    .attr("x1", function(d) { return x(d.label_x); })
+    .attr("x2", function(d) { return x(d.label_x); })
+    .attr("y1", function(d) { return y(d.label_y_anchor)+(d.label_y_anchor < 0 ? 2 : -2); })
+    .attr("y2", function(d) { return y(d.label_y)+(d.label_y < 0 ? -10 : 0 ); });
+
+  lines
+    .classed("hover", function(d) { return d == highlighted_rect; })
+    .transition()
+    .attr("x1", function(d) { return x(d.label_x); })
+    .attr("x2", function(d) { return x(d.label_x); })
+    .attr("y1", function(d) { return y(d.label_y_anchor)+(d.label_y_anchor < 0 ? 2 : -2); })
+    .attr("y2", function(d) { return y(d.label_y)+(d.label_y < 0 ? -10 : 0 ); });
+
+  // Now add info box
+  if(highlighted_rect != undefined ) {
+    var emissions_direction = highlighted_rect.abatement > 0 ? "reduces" : "increases";
+    var costs_direction = highlighted_rect.incremental_cost > 0 ? "increases" : "reduces";
+    d3.select("#infobox").html(
+        ""+highlighted_rect.name+" "+
+        emissions_direction+" emissions by "+format(Math.abs(highlighted_rect.abatement))+"&thinsp;"+x_axis_name+" and "+
+        costs_direction+" costs by "+format(Math.abs(highlighted_rect.incremental_cost))+"&thinsp;"+incremental_cost_name+" (equivalent to "+
+        format(highlighted_rect.incremental_cost/Math.abs(highlighted_rect.abatement))+"&thinsp;"+y_axis_name+")"
+        )
+      .classed("show", true);
+  } else {
+    d3.select("#infobox").text("").classed("show",false);
+  }
+
+};
+
+var category_colours = undefined;
+
+function reformat_tsv(d) {
+  if(d.length < 4) return;
+   var label, category, abatement, incremental_cost;
+   label = d[0].trim();
+   category = d[1].trim();
+   abatement =  +(d[2].replace(/[,()]/g,''));
+   incremental_cost =  +(d[3].replace(/[,()]/g,''));
+   return {
+     id: label,
+     name: label,
+     incremental_cost: incremental_cost,
+     abatement: abatement,
+     color: category_colours(category)
+   }
+}
+
+var data = undefined;
+
+
+var go = function() {
+  var tsv = d3.select('#tsv').node().value;
+  x_axis_name = d3.select('#x_axis_name').node().value;
+  y_axis_name = d3.select('#y_axis_name').node().value;
+  incremental_cost_name = d3.select('#incremental_cost_name').node().value;
+  category_colours = d3.scale.category10();
+  data = d3.tsv.parseRows(tsv, reformat_tsv);
+  draw_macc();
+};
+
+d3.select("#go").on("click", function(){ go(); d3.event.preventDefault();} );
+d3.select("#clear").on("click", function(){ d3.select('#tsv').node().value = ""; d3.event.preventDefault(); } );
+
+go();
+
+
+
+    </script>
+    </body>
+    </html>
