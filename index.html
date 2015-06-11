@@ -669,7 +669,7 @@ var go = function() {
   y_axis_name = d3.select('#y_axis_name').node().value;
   minimum_pixels_for_label = d3.select('#minimum_pixels_for_label').node().value;
   incremental_cost_name = d3.select('#incremental_cost_name').node().value;
-  category_colours = d3.scale.category10();
+  category_colours = d3.scale.category20();
   data = d3.tsv.parseRows(tsv, reformat_tsv);
   draw_macc();
 };
