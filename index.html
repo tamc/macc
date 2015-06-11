@@ -157,6 +157,10 @@ Thing 5	Category 1	-15	-25
   <p>y axis name<input value='£2011/tCO2e' id='y_axis_name'></p>
   <p>incremental cost name<input value='£M' id='incremental_cost_name'></p>
   <p>Minimum width for label to be displayed <input value='20' id='minimum_pixels_for_label'> in pixels (zero means label every box)</p>
+  <p>Minimum y to display <input value='' id='y_min'> (leave blank for automatic scaling)</p>
+  <p>Maximum y to display <input value='' id='y_max'> (leave blank for automatic scaling)</p>
+  <p>Width <input value='' id='chart_width'> in pixels (leave blank for automatic scaling)</p>
+  <p>Height <input value='' id='chart_height'> in pixels (leave blank for automatic scaling)</p>
   <p>Margin top <input value='50' id='margin_top'> in pixels (increase if the labels go off of the top)</p>
   <p>Margin bottom <input value='50' id='margin_bottom'> in pixels (increase if the labels go off of the bottom)</p>
   <input type='submit' id='go' value='Redraw chart'/>
@@ -428,6 +432,8 @@ var x_axis_name = "";
 var y_axis_name = "";
 var incremental_cost_name = "";
 var minimum_pixels_for_label = 20;
+var user_min_y = "";
+var user_max_y = "";
 
 var format = d3.format(".0f");
 
@@ -483,6 +489,10 @@ function draw_macc() {
   data_x_domain = maccLayout.x_domain();
   // And the y range in the data
   data_y_domain = d3.extent(data.map(function(d) { return (d.incremental_cost/d.abatement); }));
+
+  // Allow the user to override
+  if(user_min_y != "") { data_y_domain[0] = +user_min_y; }
+  if(user_max_y != "") { data_y_domain[1] = +user_max_y; }
 
   // Now change the axis to something nice that encompasses that range
   x.domain(data_x_domain).nice();
@@ -686,10 +696,27 @@ var go = function() {
   y_axis_name = d3.select('#y_axis_name').node().value;
   margin.top = +d3.select('#margin_top').node().value;
   margin.bottom = +d3.select('#margin_bottom').node().value;
-  width = window.innerWidth - margin.left - margin.right;
-  height = window.innerHeight - margin.top - margin.bottom;
-  if(height < 400) height = 400;
-  if(width < 400) width = 400;
+
+  user_width = d3.select('#chart_width').node().value;
+  user_height = d3.select('#chart_height').node().value;
+
+  user_min_y = d3.select('#y_min').node().value;
+  user_max_y = d3.select('#y_max').node().value;
+
+  if(user_width == "") {
+    width = window.innerWidth - margin.left - margin.right;
+    if(width < 400) width = 400;
+  } else {
+    width = +user_width;
+  }
+
+  if(user_height == "") {
+    height = window.innerHeight - margin.top - margin.bottom;
+    if(height < 400) height = 400;
+  } else {
+    height = +user_height;
+  }
+  
   minimum_pixels_for_label = d3.select('#minimum_pixels_for_label').node().value;
   incremental_cost_name = d3.select('#incremental_cost_name').node().value;
   category_colours = d3.scale.category20();
