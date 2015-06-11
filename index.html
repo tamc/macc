@@ -135,10 +135,26 @@ div#infobox.show {
   height: 200px;
 }
 
+#show_hide {
+  cursor: pointer;
+  font-size: 8px;
+  position: absolute;
+  top: 0;
+  right: 0;
+}
 
+#show_hide:hover {
+  text-decoration: underline;
+}
+
+#inputs.hidden {
+  display: none;
+}
 
   </style>
   <body>
+  <div id='show_hide'>Hide inputs</div>
+  <div id='inputs'>
   <h1>Marginal Abatement Cost Curve chart drawing</h1>
   <p>
   Paste tab separated data in as "<code>Name [TAB] Category [TAB] Abatement potential [TAB] Cost [NEWLINE]</code>". 
@@ -727,6 +743,19 @@ var go = function() {
 
 d3.select("#go").on("click", function(){ go(); d3.event.preventDefault();} );
 d3.select("#clear").on("click", function(){ d3.select('#tsv').node().value = ""; d3.event.preventDefault(); } );
+
+var inputs_hidden = false;
+d3.select("#show_hide").on("click", function() {
+    if(inputs_hidden) {
+      d3.select("#inputs").classed("hidden", false);
+      d3.select("#show_hide").text("Hide inputs");
+      inputs_hidden = false;
+    } else {
+      d3.select("#inputs").classed("hidden", true);
+      d3.select("#show_hide").text("Show inputs");
+      inputs_hidden = true;
+    }
+  });
 
 go();
 
