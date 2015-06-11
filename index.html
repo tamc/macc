@@ -153,6 +153,7 @@ Thing 5	Category 1	-15	-25
   <p>x axis name<input value='MtCO2e in 2025' id='x_axis_name'></p>
   <p>y axis name<input value='£2011/tCO2e' id='y_axis_name'></p>
   <p>incremental cost name<input value='£M' id='incremental_cost_name'></p>
+  <p>Minimum width for label to be displayed <input value='20' id='minimum_pixels_for_label'> in pixels (zero means label every box)</p>
   <input type='submit' id='go' value='Redraw chart'/>
 </div>
 <div id='chart'> </div>
@@ -421,6 +422,7 @@ var data = [];
 var x_axis_name = "";
 var y_axis_name = "";
 var incremental_cost_name = "";
+var minimum_pixels_for_label = 20;
 
 var format = d3.format(".0f");
 
@@ -478,7 +480,7 @@ function draw_macc() {
   x.domain(data_x_domain).nice();
   y.domain(data_y_domain).nice();
   // Now rework out how much space we have for drawing labels
-  delta_x_minimum_for_label = x.invert(20)-x.invert(0);
+  delta_x_minimum_for_label = x.invert(minimum_pixels_for_label)-x.invert(0);
   maccLayout.delta_x_minimum_for_label(delta_x_minimum_for_label);
   maccLayout.label_minimum_gap(y.invert(0)-y.invert(20));  
   // And sadly, we now need to rework the maccLayout
@@ -662,6 +664,7 @@ var go = function() {
   var tsv = d3.select('#tsv').node().value;
   x_axis_name = d3.select('#x_axis_name').node().value;
   y_axis_name = d3.select('#y_axis_name').node().value;
+  minimum_pixels_for_label = d3.select('#minimum_pixels_for_label').node().value;
   incremental_cost_name = d3.select('#incremental_cost_name').node().value;
   category_colours = d3.scale.category10();
   data = d3.tsv.parseRows(tsv, reformat_tsv);
