@@ -539,6 +539,7 @@ function draw_macc() {
   // Arrange some groups in the right order
   gEnter.append("g").attr("id", "boxlayer");
   gEnter.append("g").attr("id", "axislayer");
+  gEnter.append("g").attr("id", "legendlayer");
   gEnter.append("g").attr("id", "shadowlayer");
   gEnter.append("g").attr("id", "labellayer");
   gEnter.append("g").attr("id", "linelayer");
@@ -557,7 +558,7 @@ function draw_macc() {
   
   rects
     .classed("hover", function(d) { return d == highlighted_rect; })
-    .attr("style", function(d) { return "fill:"+d.color; })
+    .attr("style", function(d) { return "fill:"+category_colours(d.category); })
   .transition()
     .attr("x", function(d) { return x(d.x); })
     .attr("width", function(d) { return x(d.w)-x(0) })
@@ -595,12 +596,13 @@ function draw_macc() {
 
   axisLayer.append("text")
     .classed("xlabel", true)
+    .attr("text-anchor", "end")
     .attr("x", x.range()[1]-41)
     .attr("y", y(0)+42);
 
   svg.select('.xlabel').transition()
     .text(x_axis_name)
-    .attr("x", x.range()[1]-41)
+    .attr("x", x.range()[1])
     .attr("y", y(0)+42);
 
   // Now we lay out some shadow labels (so that the labels stand out)
@@ -681,10 +683,37 @@ function draw_macc() {
     d3.select("#infobox").text("").classed("show",false);
   }
 
+  // Now the legend
+  var legends = svg.select("g#legendlayer").selectAll("g.legend")
+    .data(categories.values());
+
+  legends.exit().remove();
+
+  var new_legends = legends.enter().append("g").classed("legend",true);
+
+  new_legends.append("rect")
+    .attr("width",20)
+    .attr("height",20);
+
+  new_legends.append("text")
+    .attr("text-anchor", "end");
+
+  legends.select("rect")
+    .attr("fill", function(d) { return category_colours(d); })
+    .attr("x",  x.range()[1]-20)
+    .attr("y", function(d,i) { return y.range()[0]+(margin.bottom-25)-(25*i) });
+
+  legends.select("text")
+    .text(Object)
+    .attr("x", x.range()[1]-25)
+    .attr("y", function(d,i) { return y.range()[0]+(margin.bottom-25)-(25*i)+14 });
+
+
 };
 
 var category_colours = undefined;
 var id_count = 0;
+var categories = d3.set();
 
 function reformat_tsv(d) {
   if(d.length < 4) return;
@@ -694,17 +723,17 @@ function reformat_tsv(d) {
    category = d[1].trim();
    abatement =  +(d[2].replace(/[,()]/g,''));
    incremental_cost =  +(d[3].replace(/[,()]/g,''));
+   categories.add(category);
    return {
      id: id_count,
      name: label,
+     category: category,
      incremental_cost: incremental_cost,
      abatement: abatement,
-     color: category_colours(category)
    }
 }
 
 var data = undefined;
-
 
 var go = function() {
   var tsv = d3.select('#tsv').node().value;
@@ -735,9 +764,17 @@ var go = function() {
   
   minimum_pixels_for_label = d3.select('#minimum_pixels_for_label').node().value;
   incremental_cost_name = d3.select('#incremental_cost_name').node().value;
-  category_colours = d3.scale.category20();
   id_count = 0;
+  categories = d3.set();
+
   data = d3.tsv.parseRows(tsv, reformat_tsv);
+
+  if(categories.size() > 10) {
+    category_colours = d3.scale.category20();
+  } else {
+    category_colours = d3.scale.category10();
+  }
+
   draw_macc();
 };
 
